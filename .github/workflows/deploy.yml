@@ -1,0 +1,60 @@
+# Reusable deploy: call from an application repo after its CI is green.
+#   jobs:
+#     deploy:
+#       uses: kalpesh122/agentic-infra/.github/workflows/deploy.yml@main
+#       with: { environment: dev, service: api-dev, region: asia-south1, image_repository: asia-south1-docker.pkg.dev/<project>/api }
+#       secrets: { workload_identity_provider: ${{ secrets.WIF_PROVIDER }}, service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }} }
+name: Deploy to Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+      service: { type: string, required: true }
+      region: { type: string, required: true }
+      image_repository: { type: string, required: true }
+      dockerfile: { type: string, default: Dockerfile }
+      context: { type: string, default: . }
+    secrets:
+      workload_identity_provider: { required: true }
+      service_account: { required: true }
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.workload_identity_provider }}
+          service_account: ${{ secrets.service_account }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+      - uses: docker/setup-buildx-action@v3
+      - id: image
+        run: echo "ref=${{ inputs.image_repository }}/${{ inputs.service }}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service }}
+          region: ${{ inputs.region }}
+          image: ${{ steps.image.outputs.ref }}
+      - run: |
+          URL=$(gcloud run services describe ${{ inputs.service }} --region ${{ inputs.region }} --format 'value(status.url)')
+          echo "deployed ${{ steps.image.outputs.ref }} → $URL"
+          curl -fsS "$URL/health"
