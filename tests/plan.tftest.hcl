@@ -11,7 +11,7 @@ mock_provider "google" {
     }
   }
   mock_resource "google_sql_database_instance" {
-    defaults = { connection_name = "example-dev:asia-south1:api-dev-pg", name = "api-dev-pg" }
+    defaults = { connection_name = "example-dev:asia-south1:api-dev-pg" }
   }
   mock_resource "google_artifact_registry_repository" {
     defaults = { id = "projects/example-dev/locations/asia-south1/repositories/api" }
